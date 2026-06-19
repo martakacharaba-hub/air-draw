@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="uk">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Air Draw — малювання в повітрі</title>
+<title>Air Draw — draw in the air</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <style>
@@ -472,13 +472,13 @@
   <div class="onboard-card">
     <div class="onboard-label">air draw</div>
     <p class="onboard-desc">
-      малюй пальцем у повітрі — камера лише відстежує руку.<br>
-      відео нікуди не зберігається й не передається.
+      draw with your finger in the air — the camera only tracks your hand.<br>
+      video is never saved or sent anywhere.
     </p>
     <div class="preview-strip-wrap">
       <div class="preview-strip" id="preview-strip"></div>
     </div>
-    <button class="btn-primary" id="btn-enable-cam">увімкнути камеру</button>
+    <button class="btn-primary" id="btn-enable-cam">enable camera</button>
     <p class="status-msg" id="onboard-status"></p>
   </div>
 </div>
@@ -487,7 +487,7 @@
 <div id="screen-gestures" class="screen">
   <div class="gesture-layout">
     <div class="gesture-content">
-      <div class="step-indicator" id="step-label">крок 1 / 2</div>
+      <div class="step-indicator" id="step-label">step 1 / 2</div>
       <svg class="gesture-icon" id="gesture-icon" viewBox="0 0 64 64" fill="none" stroke="#9fa8da" stroke-width="1.5" stroke-linecap="round">
         <!-- draw icon default -->
         <path d="M32 48 L32 28 M32 28 L28 20 M32 28 L36 20"/>
@@ -495,19 +495,19 @@
       </svg>
       <div class="gesture-title" id="gesture-title">draw</div>
       <p class="gesture-desc" id="gesture-desc">
-        випрями вказівний палець, решту зігни в кулак — ніби тримаєш невидимий олівець. кінчик пальця лишає світловий слід.
+        point your index finger, curl the rest into a fist — like holding an invisible pencil. the fingertip leaves a glowing trail.
       </p>
       <div class="gesture-demo">
         <canvas id="gesture-demo-canvas"></canvas>
       </div>
       <div class="gesture-nav">
-        <button class="btn-ghost" id="btn-gesture-back" style="display:none">назад</button>
-        <button class="btn-primary" id="btn-gesture-next">далі</button>
+        <button class="btn-ghost" id="btn-gesture-back" style="display:none">back</button>
+        <button class="btn-primary" id="btn-gesture-next">next</button>
       </div>
     </div>
     <div class="cam-preview-gesture">
       <video id="gesture-video" autoplay playsinline muted></video>
-      <span class="cam-label">камера</span>
+      <span class="cam-label">camera</span>
     </div>
   </div>
 </div>
@@ -515,15 +515,15 @@
 <!-- Screen 3: Canvas -->
 <div id="screen-canvas" class="screen">
   <canvas id="draw-canvas"></canvas>
-  <div class="cam-pip" id="cam-pip" title="тап — згорнути/розгорнути">
+  <div class="cam-pip" id="cam-pip" title="tap to collapse / expand">
     <video id="canvas-video" autoplay playsinline muted></video>
     <span class="pip-icon">📷</span>
   </div>
   <div class="gesture-hint" id="gesture-hint"></div>
   <div class="color-dot" id="color-dot"></div>
   <div class="save-thumb" id="save-thumb">
-    <img id="save-img" alt="збережений малюнок">
-    <span class="dl-label">завантажити</span>
+    <img id="save-img" alt="saved drawing">
+    <span class="dl-label">download</span>
   </div>
   <div class="clear-flash" id="clear-flash"></div>
 </div>
@@ -548,16 +548,47 @@ let animFrameId = null;
 let lastVideoTime = -1;
 
 // Drawing state
-let strokes = [];          // { points:[{x,y,t,w}], color }
 let currentStroke = null;
-let eraseTargets = [];     // points being faded
-let smoothedPos = null;
-let prevPos = null;
+let cursorPos = null;       // smoothed finger position
+let prevDrawPos = null;
+let smoothedWidth = 3;
 let currentGesture = 'none';
 let colorIndex = 0;
 let palmStillSince = null;
-let lastHintTime = 0;
 let canvasFade = 1;
+
+// Offscreen layer for committed ink
+const layerCanvas = document.createElement('canvas');
+const layerCtx = layerCanvas.getContext('2d');
+
+// One Euro Filter — adaptive smoothing (less jitter, low lag)
+class OneEuro1D {
+  constructor(minCutoff = 1.4, beta = 0.025) {
+    this.minCutoff = minCutoff;
+    this.beta = beta;
+    this.x = null;
+    this.dx = 0;
+    this.t = null;
+  }
+  filter(v, t) {
+    if (this.x === null) { this.x = v; this.t = t; return v; }
+    const dt = Math.max(0.001, (t - this.t) / 1000);
+    this.t = t;
+    const dx = (v - this.x) / dt;
+    this.dx = this._lp(dx, this.dx, dt, 1.0);
+    const cutoff = this.minCutoff + this.beta * Math.abs(this.dx);
+    this.x = this._lp(v, this.x, dt, cutoff);
+    return this.x;
+  }
+  _lp(v, prev, dt, cutoff) {
+    const tau = 1 / (2 * Math.PI * cutoff);
+    const a = 1 / (1 + tau / dt);
+    return a * v + (1 - a) * prev;
+  }
+  reset() { this.x = null; this.dx = 0; this.t = null; }
+}
+const euroX = new OneEuro1D(1.4, 0.025);
+const euroY = new OneEuro1D(1.4, 0.025);
 
 // ── DOM refs ──
 const screens = {
@@ -674,7 +705,7 @@ function startGestureDemo(mode) {
         const angle = (i / 60) * Math.PI * 1.5 + t * 0.5;
         pts.push({ x: c.width*.5 + Math.cos(angle)*50, y: c.height*.5 + Math.sin(angle)*30 });
       }
-      drawGlowPath(ctx, pts, COLORS[0], 2.5);
+      drawStroke(ctx, pts, COLORS[0]);
       // Finger cursor
       const tip = pts[pts.length-1];
       drawCursor(ctx, tip.x, tip.y, 8, 'draw');
@@ -708,13 +739,13 @@ function startGestureDemo(mode) {
 const gestureSteps = [
   {
     title: 'draw',
-    desc: 'випрями вказівний палець, решту зігни в кулак — ніби тримаєш невидимий олівець. кінчик пальця лишає світловий слід.',
+    desc: 'point your index finger, curl the rest into a fist — like holding an invisible pencil. the fingertip leaves a glowing trail.',
     icon: `<path d="M32 48 L32 28 M32 28 L28 20 M32 28 L36 20"/><circle cx="32" cy="14" r="3" fill="#9fa8da" stroke="none"/>`,
     demo: 'draw',
   },
   {
     title: 'erase',
-    desc: 'стисни руку в кулак і проведи по канвасу — все під кулаком м\'яко зникає, ніби ластиком.',
+    desc: 'make a fist and move it across the canvas — everything underneath softly fades away, like an eraser.',
     icon: `<circle cx="32" cy="30" r="14"/><path d="M22 38 Q32 48 42 38"/>`,
     demo: 'erase',
   },
@@ -722,12 +753,12 @@ const gestureSteps = [
 
 function updateGestureStep() {
   const step = gestureSteps[gestureStep];
-  document.getElementById('step-label').textContent = `крок ${gestureStep+1} / 2`;
+  document.getElementById('step-label').textContent = `step ${gestureStep+1} / 2`;
   document.getElementById('gesture-title').textContent = step.title;
   document.getElementById('gesture-desc').textContent = step.desc;
   document.getElementById('gesture-icon').innerHTML = step.icon;
   document.getElementById('btn-gesture-back').style.display = gestureStep > 0 ? '' : 'none';
-  document.getElementById('btn-gesture-next').textContent = gestureStep === 1 ? 'почати малювати' : 'далі';
+  document.getElementById('btn-gesture-next').textContent = gestureStep === 1 ? 'start drawing' : 'next';
   startGestureDemo(step.demo);
 }
 
@@ -800,37 +831,126 @@ function landmarkToCanvas(lm, tipIdx) {
   };
 }
 
-// Smooth position with easing
-function smoothPos(target, factor = 0.35) {
-  if (!smoothedPos) return { ...target };
+// Smooth finger position
+function filterFingerPos(raw, t) {
   return {
-    x: smoothedPos.x + (target.x - smoothedPos.x) * factor,
-    y: smoothedPos.y + (target.y - smoothedPos.y) * factor,
+    x: euroX.filter(raw.x, t),
+    y: euroY.filter(raw.y, t),
   };
 }
 
-// ── Drawing helpers ──
-function drawGlowPath(ctx, points, color, baseWidth) {
-  if (points.length < 2) return;
+// Catmull-Rom spline point
+function catmullRom(p0, p1, p2, p3, t) {
+  const t2 = t * t, t3 = t2 * t;
+  return {
+    x: 0.5 * ((2*p1.x) + (-p0.x+p2.x)*t + (2*p0.x-5*p1.x+4*p2.x-p3.x)*t2 + (-p0.x+3*p1.x-3*p2.x+p3.x)*t3),
+    y: 0.5 * ((2*p1.y) + (-p0.y+p2.y)*t + (2*p0.y-5*p1.y+4*p2.y-p3.y)*t2 + (-p0.y+3*p1.y-3*p2.y+p3.y)*t3),
+    w: p1.w + (p2.w - p1.w) * t,
+  };
+}
+
+// Resample stroke along smooth spline (~every 2px)
+function resampleStroke(points) {
+  if (points.length < 2) return [...points];
+  const out = [{ ...points[0] }];
+  const spacing = 2;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+    const steps = Math.max(4, Math.ceil(Math.hypot(p2.x - p1.x, p2.y - p1.y) / 3));
+
+    for (let s = 1; s <= steps; s++) {
+      const pt = catmullRom(p0, p1, p2, p3, s / steps);
+      const last = out[out.length - 1];
+      if (Math.hypot(pt.x - last.x, pt.y - last.y) >= spacing) {
+        out.push(pt);
+      }
+    }
+  }
+  const end = points[points.length - 1];
+  const last = out[out.length - 1];
+  if (Math.hypot(end.x - last.x, end.y - last.y) > 1) out.push(end);
+  return out;
+}
+
+// Add point with gap interpolation (no jumps between frames)
+function appendPoint(stroke, x, y, w) {
+  const pts = stroke.points;
+  if (pts.length === 0) {
+    pts.push({ x, y, w });
+    return;
+  }
+  const last = pts[pts.length - 1];
+  const dist = Math.hypot(x - last.x, y - last.y);
+  if (dist > 14) {
+    const steps = Math.ceil(dist / 4);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      pts.push({
+        x: last.x + (x - last.x) * t,
+        y: last.y + (y - last.y) * t,
+        w: last.w + (w - last.w) * t,
+      });
+    }
+  } else if (dist > 1) {
+    pts.push({ x, y, w });
+  }
+}
+
+// Multi-pass neon glow stroke
+function drawStroke(ctx, points, color) {
+  if (points.length === 0) return;
+  if (points.length === 1) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(points[0].x, points[0].y, points[0].w || 2, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = color;
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  const samples = resampleStroke(points);
+  const passes = [
+    { blur: 22, alpha: 0.12, mul: 2.8 },
+    { blur: 12, alpha: 0.3,  mul: 1.8 },
+    { blur: 5,  alpha: 0.85, mul: 1.0 },
+  ];
+
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.shadowBlur = 14;
-  ctx.shadowColor = color;
 
-  for (let i = 1; i < points.length; i++) {
-    const p0 = points[i-1], p1 = points[i];
-    const w = p1.w || baseWidth;
-    const alpha = i / points.length;
-    ctx.beginPath();
-    ctx.moveTo(p0.x, p0.y);
-    ctx.lineTo(p1.x, p1.y);
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.3 + alpha * 0.7;
-    ctx.lineWidth = w;
-    ctx.stroke();
+  for (const pass of passes) {
+    ctx.shadowBlur = pass.blur;
+    ctx.shadowColor = color;
+    ctx.globalAlpha = pass.alpha;
+
+    for (let i = 1; i < samples.length; i++) {
+      const a = samples[i - 1], b = samples[i];
+      const fade = i / samples.length;
+      const w = ((a.w + b.w) / 2) * pass.mul;
+      ctx.globalAlpha = pass.alpha * (0.35 + fade * 0.65);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = w;
+      ctx.stroke();
+    }
   }
   ctx.restore();
+}
+
+function commitStroke() {
+  if (!currentStroke || currentStroke.points.length === 0) return;
+  drawStroke(layerCtx, currentStroke.points, currentStroke.color);
+  currentStroke = null;
 }
 
 function drawCursor(ctx, x, y, radius, mode) {
@@ -856,48 +976,72 @@ function drawCursor(ctx, x, y, radius, mode) {
   ctx.restore();
 }
 
-function renderCanvas(cursorPos, cursorMode) {
-  const w = drawCanvas.width, h = drawCanvas.height;
-  drawCtx.clearRect(0, 0, w, h);
-  drawCtx.globalAlpha = canvasFade;
+function renderCanvas() {
+  const rect = drawCanvas.getBoundingClientRect();
+  drawCtx.clearRect(0, 0, rect.width, rect.height);
 
-  strokes.forEach(stroke => {
-    if (stroke.points.length > 1) drawGlowPath(drawCtx, stroke.points, stroke.color, 2.5);
-  });
-  if (currentStroke && currentStroke.points.length > 1) {
-    drawGlowPath(drawCtx, currentStroke.points, currentStroke.color, 2.5);
+  drawCtx.save();
+  drawCtx.globalAlpha = canvasFade;
+  drawCtx.drawImage(layerCanvas, 0, 0, rect.width, rect.height);
+  drawCtx.restore();
+
+  if (currentStroke && currentStroke.points.length > 0) {
+    drawCtx.globalAlpha = canvasFade;
+    drawStroke(drawCtx, currentStroke.points, currentStroke.color);
+    drawCtx.globalAlpha = 1;
   }
 
-  drawCtx.globalAlpha = 1;
-
-  if (cursorPos && cursorMode) {
-    drawCursor(drawCtx, cursorPos.x, cursorPos.y, cursorMode === 'erase' ? ERASE_RADIUS : 10, cursorMode);
+  if (cursorPos) {
+    const mode = currentGesture === 'draw' ? 'draw' : currentGesture === 'erase' ? 'erase' : null;
+    if (mode) drawCursor(drawCtx, cursorPos.x, cursorPos.y, mode === 'erase' ? ERASE_RADIUS : 10, mode);
   }
 }
 
 function resizeCanvas() {
   const rect = drawCanvas.getBoundingClientRect();
   const dpr = devicePixelRatio;
-  drawCanvas.width = rect.width * dpr;
-  drawCanvas.height = rect.height * dpr;
+  const w = rect.width * dpr;
+  const h = rect.height * dpr;
+
+  // Preserve layer content on resize
+  const snapshot = document.createElement('canvas');
+  snapshot.width = layerCanvas.width;
+  snapshot.height = layerCanvas.height;
+  snapshot.getContext('2d').drawImage(layerCanvas, 0, 0);
+
+  drawCanvas.width = w;
+  drawCanvas.height = h;
+  layerCanvas.width = w;
+  layerCanvas.height = h;
   drawCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  renderCanvas(smoothedPos, currentGesture === 'draw' ? 'draw' : currentGesture === 'erase' ? 'erase' : null);
+  layerCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  if (snapshot.width > 0) {
+    layerCtx.drawImage(snapshot, 0, 0, rect.width, rect.height);
+  }
+  renderCanvas();
 }
 
-// ── Erase logic ──
+// Soft radial erase on layer
 function eraseAt(x, y) {
-  const r = ERASE_RADIUS;
-  strokes = strokes.map(stroke => {
-    const remaining = stroke.points.filter(p => Math.hypot(p.x-x, p.y-y) > r);
-    if (remaining.length < stroke.points.length * 0.3) return null;
-    // Fade points near erase zone
-    stroke.points = stroke.points.map(p => {
-      const d = Math.hypot(p.x-x, p.y-y);
-      if (d < r) return null;
-      return p;
-    }).filter(Boolean);
-    return stroke.points.length > 0 ? stroke : null;
-  }).filter(Boolean);
+  layerCtx.save();
+  layerCtx.globalCompositeOperation = 'destination-out';
+  const g = layerCtx.createRadialGradient(x, y, 0, x, y, ERASE_RADIUS);
+  g.addColorStop(0, 'rgba(0,0,0,0.85)');
+  g.addColorStop(0.55, 'rgba(0,0,0,0.35)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  layerCtx.fillStyle = g;
+  layerCtx.beginPath();
+  layerCtx.arc(x, y, ERASE_RADIUS, 0, Math.PI * 2);
+  layerCtx.fill();
+  layerCtx.restore();
+
+  // Also trim live stroke near eraser
+  if (currentStroke) {
+    currentStroke.points = currentStroke.points.filter(
+      p => Math.hypot(p.x - x, p.y - y) > ERASE_RADIUS * 0.7
+    );
+  }
 }
 
 // ── Main detection loop ──
@@ -911,15 +1055,20 @@ function detectLoop() {
     lastVideoTime = hiddenVideo.currentTime;
     const result = handLandmarker.detectForVideo(hiddenVideo, performance.now());
 
-    if (currentScreen === 'canvas' && result.landmarks.length > 0) {
-      processHand(result.landmarks[0]);
+    if (currentScreen === 'canvas') {
+      if (result.landmarks.length > 0) {
+        processHand(result.landmarks[0]);
+      } else if (currentGesture === 'draw') {
+        commitStroke();
+        currentGesture = 'none';
+        cursorPos = null;
+        euroX.reset();
+        euroY.reset();
+      }
     }
   }
 
-  renderCanvas(
-    smoothedPos,
-    currentGesture === 'draw' ? 'draw' : currentGesture === 'erase' ? 'erase' : null
-  );
+  renderCanvas();
 
   animFrameId = requestAnimationFrame(detectLoop);
 }
@@ -929,17 +1078,17 @@ let lastLikeTime = 0;
 
 function processHand(lm) {
   const gesture = detectGesture(lm);
+  const now = performance.now();
   const tipPos = landmarkToCanvas(lm, LANDMARK.INDEX_TIP);
   const wristPos = landmarkToCanvas(lm, LANDMARK.WRIST);
+  const raw = gesture === 'erase' ? wristPos : tipPos;
 
-  // Use index tip for draw, wrist for erase
-  const targetPos = gesture === 'erase' ? wristPos : tipPos;
-  smoothedPos = smoothPos(targetPos, 0.3);
+  cursorPos = filterFingerPos(raw, now);
 
   // Color dot follows finger
   if (gesture === 'draw' || gesture === 'victory') {
-    colorDot.style.left = (smoothedPos.x - 6) + 'px';
-    colorDot.style.top = (smoothedPos.y - 6) + 'px';
+    colorDot.style.left = (cursorPos.x - 6) + 'px';
+    colorDot.style.top = (cursorPos.y - 6) + 'px';
     colorDot.style.color = COLORS[colorIndex];
     colorDot.style.background = COLORS[colorIndex];
     colorDot.classList.add('visible');
@@ -951,7 +1100,7 @@ function processHand(lm) {
   if (gesture === 'victory' && Date.now() - lastVictoryTime > 800) {
     lastVictoryTime = Date.now();
     colorIndex = (colorIndex + 1) % COLORS.length;
-    showHint(`колір: ${colorIndex + 1}/${COLORS.length}`);
+    showHint(`color: ${colorIndex + 1}/${COLORS.length}`);
   }
 
   // Like → save
@@ -969,33 +1118,33 @@ function processHand(lm) {
       clearCanvas();
     } else {
       const progress = (Date.now() - palmStillSince) / PALM_HOLD_MS;
-      showHint(`очистити… ${Math.round(progress * 100)}%`);
+      showHint(`clearing… ${Math.round(progress * 100)}%`);
     }
   } else {
     palmStillSince = null;
   }
 
-  // Draw
+  // Draw — speed-reactive width with smoothing
   if (gesture === 'draw') {
     if (currentGesture !== 'draw') {
       currentStroke = { points: [], color: COLORS[colorIndex] };
+      prevDrawPos = null;
     }
-    const speed = prevPos ? Math.hypot(smoothedPos.x - prevPos.x, smoothedPos.y - prevPos.y) : 0;
-    const width = Math.max(1.2, Math.min(4, 4 - speed * 0.08));
-    currentStroke.points.push({ x: smoothedPos.x, y: smoothedPos.y, w: width });
-    prevPos = { ...smoothedPos };
+    const speed = prevDrawPos
+      ? Math.hypot(cursorPos.x - prevDrawPos.x, cursorPos.y - prevDrawPos.y)
+      : 0;
+    const targetW = Math.max(1.5, Math.min(5.5, 5.8 - speed * 0.14));
+    smoothedWidth += (targetW - smoothedWidth) * 0.3;
+    appendPoint(currentStroke, cursorPos.x, cursorPos.y, smoothedWidth);
+    prevDrawPos = { x: cursorPos.x, y: cursorPos.y };
   } else {
-    if (currentGesture === 'draw' && currentStroke && currentStroke.points.length > 0) {
-      strokes.push(currentStroke);
-    }
-    currentStroke = null;
-    prevPos = null;
+    if (currentGesture === 'draw') commitStroke();
+    prevDrawPos = null;
+    smoothedWidth = 3;
   }
 
   // Erase
-  if (gesture === 'erase') {
-    eraseAt(smoothedPos.x, smoothedPos.y);
-  }
+  if (gesture === 'erase') eraseAt(cursorPos.x, cursorPos.y);
 
   currentGesture = gesture;
 }
@@ -1012,30 +1161,36 @@ function clearCanvas() {
   const fadeOut = () => {
     canvasFade -= 0.04;
     if (canvasFade <= 0) {
-      strokes = [];
+      layerCtx.clearRect(0, 0, layerCanvas.width, layerCanvas.height);
+      currentStroke = null;
       canvasFade = 1;
       clearFlash.classList.add('active');
       setTimeout(() => clearFlash.classList.remove('active'), 600);
-      showHint('очищено');
+      showHint('cleared');
       return;
     }
+    renderCanvas();
     requestAnimationFrame(fadeOut);
   };
   fadeOut();
 }
 
 function saveCanvas() {
+  const rect = drawCanvas.getBoundingClientRect();
   const tmp = document.createElement('canvas');
   tmp.width = drawCanvas.width;
   tmp.height = drawCanvas.height;
   const tctx = tmp.getContext('2d');
   tctx.fillStyle = '#050508';
   tctx.fillRect(0, 0, tmp.width, tmp.height);
-  tctx.drawImage(drawCanvas, 0, 0);
-  const url = tmp.toDataURL('image/png');
-  saveImg.src = url;
+  tctx.drawImage(layerCanvas, 0, 0);
+  if (currentStroke && currentStroke.points.length > 0) {
+    tctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    drawStroke(tctx, currentStroke.points, currentStroke.color);
+  }
+  saveImg.src = tmp.toDataURL('image/png');
   saveThumb.classList.add('visible');
-  showHint('👍 збережено — тапни мініатюру');
+  showHint('👍 saved — tap thumbnail to download');
 }
 
 // ── Event listeners ──
@@ -1043,17 +1198,17 @@ document.getElementById('btn-enable-cam').addEventListener('click', async () => 
   const btn = document.getElementById('btn-enable-cam');
   const status = document.getElementById('onboard-status');
   btn.disabled = true;
-  status.textContent = 'завантаження моделі…';
+  status.textContent = 'loading model…';
   try {
     await initHandLandmarker();
-    status.textContent = 'запит камери…';
+    status.textContent = 'requesting camera…';
     await startCamera();
     status.textContent = '';
     showScreen('gestures');
     updateGestureStep();
     detectLoop();
   } catch (e) {
-    status.textContent = 'помилка: ' + (e.message || 'немає доступу до камери');
+    status.textContent = 'error: ' + (e.message || 'camera access denied');
     btn.disabled = false;
   }
 });
@@ -1064,8 +1219,10 @@ document.getElementById('btn-gesture-next').addEventListener('click', () => {
     updateGestureStep();
   } else {
     showScreen('canvas');
+    euroX.reset();
+    euroY.reset();
     resizeCanvas();
-    showHint('вказівний палець — малювати · кулак — стирати');
+    showHint('index finger — draw · fist — erase');
     setTimeout(() => gestureHint.classList.remove('visible'), 4000);
   }
 });

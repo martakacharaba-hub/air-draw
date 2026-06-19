@@ -1,28 +1,28 @@
 # Air Draw
 
-Міні-застосунок для малювання пальцем у повітрі перед камерою. Слід з'являється на екрані як світловий неоновий trail — керування повністю жестове.
+A mini-app for drawing with your finger in the air in front of a camera. The trail appears on screen as a glowing neon line — fully gesture-controlled.
 
-## Запуск
+## Run locally
 
-Потрібен локальний сервер (камера не працює з `file://`):
+Requires a local server (camera won't work with `file://`):
 
 ```bash
 python3 -m http.server 8080
 ```
 
-Відкрий [http://localhost:8080/air-draw.html](http://localhost:8080/air-draw.html).
+Open [http://localhost:8080/air-draw.html](http://localhost:8080/air-draw.html).
 
-## Жести
+## Gestures
 
-| Жест | Дія |
-|------|-----|
-| Вказівний палець (решта в кулаку) | Малювання |
-| Кулак | Стерти |
-| ✌️ Victory | Змінити колір |
-| 🖐️ Долоня ~1.5с | Очистити canvas |
-| 👍 Like | Зберегти малюнок |
+| Gesture | Action |
+|---------|--------|
+| Index finger (rest in fist) | Draw |
+| Fist | Erase |
+| ✌️ Victory | Change color |
+| 🖐️ Open palm ~1.5s | Clear canvas |
+| 👍 Thumbs up | Save drawing |
 
-## Технічно
+## Technical
 
 - [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) — `numHands: 1`, `runningMode: VIDEO`
-- Евристики розпізнавання жестів по tip/pip координатах (без ML-класифікатора)
+- Gesture detection via tip/pip heuristics (no ML classifier)

@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Find Your Color Story — gesture prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,600&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0b0d;
+    --bg-soft:#121214;
+    --ink:#f2ede6;
+    --ink-dim:#9a958c;
+    --gold:#c9a227;
+    --line:rgba(242,237,230,0.08);
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Manrope',sans-serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  .screen{
+    position:fixed; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; pointer-events:none;
+    transition:opacity .6s ease;
+  }
+  .screen.active{ opacity:1; pointer-events:auto; }
+
+  /* ---------- ONBOARDING ---------- */
+  #onboard .panel{
+    max-width:520px; text-align:center; padding:0 32px;
+  }
+  .eyebrow{
+    font-size:11px; letter-spacing:.2em; text-transform:uppercase;
+    color:var(--gold); margin-bottom:18px; font-weight:600;
+  }
+  h1{
+    font-family:'Fraunces',serif; font-weight:500;
+    font-size:clamp(36px,6vw,56px); line-height:1.05; margin:0 0 18px;
+    letter-spacing:-0.01em;
+  }
+  .sub{ color:var(--ink-dim); font-size:15px; line-height:1.6; margin:0 0 36px; }
+  .btn{
+    appearance:none; border:1px solid var(--ink); background:transparent; color:var(--ink);
+    font-family:'Manrope',sans-serif; font-size:14px; font-weight:600;
+    padding:14px 30px; border-radius:999px; cursor:pointer;
+    transition:background .25s ease, color .25s ease, transform .2s ease;
+  }
+  .btn:hover{ background:var(--ink); color:var(--bg); transform:translateY(-1px); }
+  .status{ margin-top:18px; font-size:12px; color:var(--ink-dim); height:16px; }
+
+  /* ---------- MAIN ---------- */
+  #main{ flex-direction:column; }
+  .topbar{
+    position:absolute; top:0; left:0; right:0;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:28px 40px; z-index:5;
+  }
+  .topbar .eyebrow{ margin:0; }
+  .gallery-wrap{
+    width:100%; height:100%;
+    display:flex; align-items:center;
+    position:relative;
+  }
+  .gallery-wrap::after{
+    content:''; position:absolute; left:0; right:0; bottom:0; height:140px;
+    background:linear-gradient(to top, rgba(0,0,0,0.45), transparent);
+    pointer-events:none; transition:opacity .4s ease;
+  }
+  #gallery{
+    display:flex; gap:28px;
+    padding:0 12vw;
+    will-change:transform;
+  }
+  .card{
+    flex:0 0 auto;
+    width:260px; height:360px;
+    border-radius:18px;
+    position:relative;
+    overflow:hidden;
+    border:1px solid var(--line);
+    transform:scale(1);
+    transition:transform .35s cubic-bezier(.2,.8,.2,1), box-shadow .35s ease;
+    cursor:pointer;
+  }
+  .card .swatches{ position:absolute; inset:0; display:flex; flex-direction:column; }
+  .card .swatches div{ flex:1; }
+  .card .label{
+    position:absolute; left:0; right:0; bottom:0;
+    padding:18px 20px 20px;
+    background:linear-gradient(to top, rgba(0,0,0,0.65), transparent 80%);
+    font-family:'Fraunces',serif; font-weight:500; font-size:19px; letter-spacing:-.01em;
+  }
+  .card .label span{
+    display:block; font-family:'Manrope',sans-serif; font-weight:500; font-size:11px;
+    letter-spacing:.12em; text-transform:uppercase; color:rgba(242,237,230,.7); margin-top:4px;
+  }
+  .card.hovered{ transform:scale(1.06); box-shadow:0 24px 60px -16px rgba(0,0,0,.6); }
+  .card.selected{ outline:2px solid var(--ink); outline-offset:4px; }
+
+  /* ---------- CURSOR ---------- */
+  #cursor{
+    position:fixed; width:34px; height:34px; border-radius:50%;
+    background:radial-gradient(circle, var(--gold) 0%, rgba(201,162,39,0.35) 60%, transparent 75%);
+    filter:blur(2px);
+    pointer-events:none; z-index:50;
+    transform:translate(-50%,-50%) scale(0);
+    transition:transform .15s ease, background .3s ease;
+    opacity:0;
+  }
+  #cursor.visible{ opacity:1; transform:translate(-50%,-50%) scale(1); }
+  #cursor.dwelling{ transform:translate(-50%,-50%) scale(1.4); }
+  #cursor .ring{
+    position:absolute; inset:-6px; border-radius:50%;
+    border:2px solid rgba(242,237,230,.8);
+    clip-path: inset(0 0 0 0);
+    opacity:0;
+  }
+
+  /* ---------- CAMERA PREVIEW ---------- */
+  #camwrap{
+    position:absolute; top:24px; right:32px; z-index:6;
+    width:140px; height:105px; border-radius:14px; overflow:hidden;
+    border:1px solid var(--line); background:#000;
+    box-shadow:0 12px 30px -10px rgba(0,0,0,.6);
+  }
+  #camwrap video, #camwrap canvas{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+    transform:scaleX(-1);
+  }
+  #camlabel{
+    position:absolute; bottom:6px; left:8px; font-size:9px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--ink-dim); z-index:2;
+  }
+
+  /* ---------- GESTURE LEGEND ---------- */
+  #legend{
+    position:absolute; bottom:36px; left:0; right:0;
+    display:flex; justify-content:center; gap:48px; z-index:5;
+    opacity:1; transition:opacity .8s ease;
+  }
+  #legend.hidden{ opacity:0; pointer-events:none; }
+  .legend-item{ text-align:center; max-width:160px; }
+  .legend-icon{
+    font-size:28px; margin-bottom:8px;
+  }
+  .legend-text{ font-size:12px; color:var(--ink-dim); line-height:1.4; }
+  .legend-text b{ color:var(--ink); font-weight:600; }
+
+  #fallback{ font-size:13px; color:var(--ink-dim); max-width:380px; line-height:1.6; }
+</style>
+</head>
+<body>
+
+  <!-- ONBOARDING -->
+  <div id="onboard" class="screen active">
+    <div class="panel">
+      <div class="eyebrow">Find Your Color Story</div>
+      <h1>Прокрути долонею.<br>Обери поглядом пальця.</h1>
+      <p class="sub">Цей прототип керується жестами через камеру — без миші й кліків.
+        Дозвольте доступ до камери, щоб почати.</p>
+      <button class="btn" id="startBtn">Увімкнути камеру</button>
+      <div class="status" id="status"></div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div id="main" class="screen">
+    <div class="topbar">
+      <div class="eyebrow" style="margin:0;">Find Your Color Story</div>
+      <div class="eyebrow" style="margin:0; color:var(--ink-dim);">прототип · MediaPipe Hands</div>
+    </div>
+
+    <div id="camwrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div id="camlabel">camera</div>
+    </div>
+
+    <div class="gallery-wrap">
+      <div id="gallery"></div>
+    </div>
+
+    <div id="legend">
+      <div class="legend-item">
+        <div class="legend-icon">🖐️</div>
+        <div class="legend-text"><b>Розкрита долоня</b><br>проведи вліво / вправо — галерея прокручується</div>
+      </div>
+      <div class="legend-item">
+        <div class="legend-icon">☝️</div>
+        <div class="legend-text"><b>Вказівний палець</b><br>наведи й затримай — картка обирається</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="cursor"><div class="ring"></div></div>
+
+<script type="module">
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+/* ---------------- color story content (placeholder palettes) ---------------- */
+const STORIES = [
+  { name:"Golden Hour", tag:"warm · radiant", colors:["#E8B65A","#C9742E","#7A3B1E","#3A1A0E"] },
+  { name:"Sage & Stone", tag:"calm · muted", colors:["#A9B79A","#7C8A6B","#4F5A45","#2A2F25"] },
+  { name:"Midnight Botanical", tag:"deep · lush", colors:["#1F3B2C","#0E2A20","#163024","#081711"] },
+  { name:"Terracotta Earth", tag:"grounded · clay", colors:["#C9683E","#8C4226","#5C2A18","#2E140C"] },
+  { name:"Coral Reef", tag:"vivid · oceanic", colors:["#FF8C7A","#E0567A","#7A3E8C","#2C1A4A"] },
+  { name:"Ink & Frost", tag:"cool · graphic", colors:["#DCE3E8","#8FA3AD","#3B4B55","#13191D"] },
+  { name:"Dusty Rose", tag:"soft · romantic", colors:["#E7C4C2","#C98E8E","#8C5A5E","#4A2E32"] },
+  { name:"Amber Library", tag:"rich · classic", colors:["#D9A441","#A8651F","#5E3713","#2B1607"] }
+];
+
+const gallery = document.getElementById('gallery');
+STORIES.forEach((s,i)=>{
+  const card = document.createElement('div');
+  card.className='card'; card.dataset.index=i;
+  const sw = document.createElement('div'); sw.className='swatches';
+  s.colors.forEach(c=>{ const d=document.createElement('div'); d.style.background=c; sw.appendChild(d); });
+  card.appendChild(sw);
+  const label = document.createElement('div'); label.className='label';
+  label.innerHTML = `${s.name}<span>${s.tag}</span>`;
+  card.appendChild(label);
+  gallery.appendChild(card);
+});
+// duplicate set for a seamless-feeling longer scroll range
+STORIES.forEach((s,i)=>{
+  const card = document.createElement('div');
+  card.className='card'; card.dataset.index=i;
+  const sw = document.createElement('div'); sw.className='swatches';
+  s.colors.forEach(c=>{ const d=document.createElement('div'); d.style.background=c; sw.appendChild(d); });
+  card.appendChild(sw);
+  const label = document.createElement('div'); label.className='label';
+  label.innerHTML = `${s.name}<span>${s.tag}</span>`;
+  card.appendChild(label);
+  gallery.appendChild(card);
+});
+
+/* ---------------- DOM refs ---------------- */
+const onboard = document.getElementById('onboard');
+const mainScreen = document.getElementById('main');
+const startBtn = document.getElementById('startBtn');
+const statusEl = document.getElementById('status');
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const octx = overlay.getContext('2d');
+const cursorEl = document.getElementById('cursor');
+const legend = document.getElementById('legend');
+
+let scrollX = 0;          // current gallery translateX
+let velocity = 0;         // momentum
+let lastPalmX = null;
+let cursorX = window.innerWidth/2, cursorY = window.innerHeight/2;
+let targetX = cursorX, targetY = cursorY;
+let dwellTarget = null, dwellStart = 0;
+const DWELL_MS = 650;
+
+/* ---------------- helpers ---------------- */
+function fingerExtended(tip, pip){ return tip.y < pip.y - 0.02; }
+
+function classifyGesture(lm){
+  const indexExt  = fingerExtended(lm[8], lm[6]);
+  const middleExt = fingerExtended(lm[12], lm[10]);
+  const ringExt   = fingerExtended(lm[16], lm[14]);
+  const pinkyExt  = fingerExtended(lm[20], lm[18]);
+
+  if (indexExt && !middleExt && !ringExt && !pinkyExt) return 'point';
+  if (indexExt && middleExt && ringExt && pinkyExt) return 'palm';
+  return 'none';
+}
+
+function lerp(a,b,t){ return a + (b-a)*t; }
+
+/* ---------------- gallery scroll loop ---------------- */
+function applyScroll(){
+  scrollX += velocity;
+  velocity *= 0.9; // momentum decay
+  const maxScroll = gallery.scrollWidth - window.innerWidth + 200;
+  scrollX = Math.max(Math.min(scrollX, 0), -maxScroll);
+  gallery.style.transform = `translateX(${scrollX}px)`;
+}
+
+/* ---------------- cursor + selection loop ---------------- */
+function applyCursor(visible){
+  cursorEl.classList.toggle('visible', visible);
+  if(!visible){ dwellTarget=null; return; }
+
+  cursorX = lerp(cursorX, targetX, 0.35);
+  cursorY = lerp(cursorY, targetY, 0.35);
+  cursorEl.style.left = cursorX+'px';
+  cursorEl.style.top  = cursorY+'px';
+
+  const el = document.elementFromPoint(cursorX, cursorY);
+  const card = el ? el.closest('.card') : null;
+
+  document.querySelectorAll('.card.hovered').forEach(c=>{ if(c!==card) c.classList.remove('hovered'); });
+
+  if(card){
+    card.classList.add('hovered');
+    if(dwellTarget !== card){
+      dwellTarget = card;
+      dwellStart = performance.now();
+      cursorEl.classList.remove('dwelling');
+    } else if(performance.now() - dwellStart > DWELL_MS){
+      document.querySelectorAll('.card.selected').forEach(c=>c.classList.remove('selected'));
+      card.classList.add('selected');
+      cursorEl.classList.add('dwelling');
+    }
+  } else {
+    dwellTarget = null;
+    cursorEl.classList.remove('dwelling');
+  }
+}
+
+/* ---------------- MediaPipe setup ---------------- */
+let handLandmarker = null;
+
+async function initModel(){
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate:"GPU" },
+    runningMode: "VIDEO",
+    numHands: 1
+  });
+}
+
+async function startCamera(){
+  statusEl.textContent = "Завантажуємо модель…";
+  try{
+    await initModel();
+  }catch(e){
+    statusEl.textContent = "Не вдалося завантажити модель MediaPipe.";
+    console.error(e);
+    return;
+  }
+  statusEl.textContent = "Запитуємо доступ до камери…";
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:640, height:480 } });
+    video.srcObject = stream;
+    await new Promise(res => video.onloadedmetadata = res);
+    video.play();
+  }catch(e){
+    statusEl.textContent = "Доступ до камери не надано.";
+    console.error(e);
+    return;
+  }
+
+  onboard.classList.remove('active');
+  mainScreen.classList.add('active');
+  setTimeout(()=> legend.classList.add('hidden'), 6000);
+
+  overlay.width = video.videoWidth || 640;
+  overlay.height = video.videoHeight || 480;
+
+  requestAnimationFrame(loop);
+}
+
+let lastTime = -1;
+function loop(){
+  if(handLandmarker && video.readyState >= 2){
+    const now = performance.now();
+    if(now !== lastTime){
+      lastTime = now;
+      const result = handLandmarker.detectForVideo(video, now);
+      octx.clearRect(0,0,overlay.width,overlay.height);
+
+      if(result.landmarks && result.landmarks.length){
+        const lm = result.landmarks[0];
+
+        // draw small dots on the preview for feedback
+        octx.fillStyle = 'rgba(201,162,39,0.9)';
+        lm.forEach(p=>{
+          octx.beginPath();
+          octx.arc(p.x*overlay.width, p.y*overlay.height, 2.5, 0, Math.PI*2);
+          octx.fill();
+        });
+
+        const gesture = classifyGesture(lm);
+
+        if(gesture === 'point'){
+          // mirror x because camera feed is mirrored visually
+          targetX = (1 - lm[8].x) * window.innerWidth;
+          targetY = lm[8].y * window.innerHeight;
+          applyCursor(true);
+          lastPalmX = null;
+          velocity *= 0.85; // settle scroll while selecting
+        } else if(gesture === 'palm'){
+          applyCursor(false);
+          const palmX = (lm[0].x + lm[9].x) / 2;
+          if(lastPalmX !== null){
+            const dx = (palmX - lastPalmX) * window.innerWidth;
+            velocity += -dx * 1.4; // mirrored: hand moving right -> content moves left feel
+          }
+          lastPalmX = palmX;
+        } else {
+          applyCursor(false);
+          lastPalmX = null;
+        }
+      } else {
+        applyCursor(false);
+        lastPalmX = null;
+      }
+    }
+  }
+  applyScroll();
+  requestAnimationFrame(loop);
+}
+
+startBtn.addEventListener('click', startCamera);
+
+// allow plain mouse-wheel scrolling too, for testing without a camera
+window.addEventListener('wheel', (e)=>{ velocity += e.deltaY * 0.6; }, { passive:true });
+</script>
+</body>
+</html>
